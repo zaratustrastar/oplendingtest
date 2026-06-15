@@ -15,9 +15,7 @@ import {
 contract MockERC20Decimals is ERC20 {
     uint8 private immutable _decimals;
 
-    constructor(string memory name_, string memory symbol_, uint8 decimals_)
-        ERC20(name_, symbol_)
-    {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         _decimals = decimals_;
     }
 
@@ -61,11 +59,7 @@ contract PMFIOpLendingV21Test is TestBase {
     function setUp() public {
         usdc = new MockERC20Decimals("USD Coin", "USDC", 6);
         collateral = new MockERC20Decimals("Collateral", "COL", 18);
-        factory = new PMFIPositionFactoryV21(
-            IERC20Metadata(address(usdc)),
-            feeRecipient,
-            address(this)
-        );
+        factory = new PMFIPositionFactoryV21(IERC20Metadata(address(usdc)), feeRecipient, address(this));
         marketplace = PMFIPrimaryMarketplaceV21(factory.marketplace());
         factory.setCollateralAllowed(address(collateral), true);
 
@@ -76,27 +70,24 @@ contract PMFIOpLendingV21Test is TestBase {
         vm.deal(borrower, 10 ether);
     }
 
-    function _create(
-        uint256 collateralAmount,
-        uint256 raiseUsdc,
-        uint256 repayUsdc
-    ) internal returns (PMFIPositionVaultV21 vault, uint256 saleId) {
-        PMFIPositionFactoryV21.CreatePositionParams memory params =
-            PMFIPositionFactoryV21.CreatePositionParams({
-                collateral: IERC20Metadata(address(collateral)),
-                collateralAmount: collateralAmount,
-                targetRaiseUsdc: raiseUsdc,
-                totalRepaymentUsdc: repayUsdc,
-                fundingDeadline: block.timestamp + 3 days,
-                repaymentDeadline: block.timestamp + 33 days,
-                namePrefix: "PMFI COL",
-                symbolPrefix: "pCOL"
-            });
+    function _create(uint256 collateralAmount, uint256 raiseUsdc, uint256 repayUsdc)
+        internal
+        returns (PMFIPositionVaultV21 vault, uint256 saleId)
+    {
+        PMFIPositionFactoryV21.CreatePositionParams memory params = PMFIPositionFactoryV21.CreatePositionParams({
+            collateral: IERC20Metadata(address(collateral)),
+            collateralAmount: collateralAmount,
+            targetRaiseUsdc: raiseUsdc,
+            totalRepaymentUsdc: repayUsdc,
+            fundingDeadline: block.timestamp + 3 days,
+            repaymentDeadline: block.timestamp + 33 days,
+            namePrefix: "PMFI COL",
+            symbolPrefix: "pCOL"
+        });
 
         vm.startPrank(borrower);
         collateral.approve(address(factory), collateralAmount);
-        (address vaultAddress, uint256 createdSaleId) =
-            factory.createPosition{value: CREATION_FEE}(params);
+        (address vaultAddress, uint256 createdSaleId) = factory.createPosition{value: CREATION_FEE}(params);
         vm.stopPrank();
 
         vault = PMFIPositionVaultV21(vaultAddress);
@@ -259,17 +250,16 @@ contract PMFIOpLendingV21Test is TestBase {
     function test_PauseBlocksNewRiskButNotCancellation() public {
         factory.setCreationPaused(true);
 
-        PMFIPositionFactoryV21.CreatePositionParams memory params =
-            PMFIPositionFactoryV21.CreatePositionParams({
-                collateral: IERC20Metadata(address(collateral)),
-                collateralAmount: 100 * ONE,
-                targetRaiseUsdc: 100e6,
-                totalRepaymentUsdc: 120e6,
-                fundingDeadline: block.timestamp + 3 days,
-                repaymentDeadline: block.timestamp + 33 days,
-                namePrefix: "PMFI COL",
-                symbolPrefix: "pCOL"
-            });
+        PMFIPositionFactoryV21.CreatePositionParams memory params = PMFIPositionFactoryV21.CreatePositionParams({
+            collateral: IERC20Metadata(address(collateral)),
+            collateralAmount: 100 * ONE,
+            targetRaiseUsdc: 100e6,
+            totalRepaymentUsdc: 120e6,
+            fundingDeadline: block.timestamp + 3 days,
+            repaymentDeadline: block.timestamp + 33 days,
+            namePrefix: "PMFI COL",
+            symbolPrefix: "pCOL"
+        });
 
         vm.startPrank(borrower);
         collateral.approve(address(factory), 100 * ONE);
@@ -299,17 +289,16 @@ contract PMFIOpLendingV21Test is TestBase {
         factory.setCollateralAllowed(address(feeToken), true);
         feeToken.mint(borrower, 100 * ONE);
 
-        PMFIPositionFactoryV21.CreatePositionParams memory params =
-            PMFIPositionFactoryV21.CreatePositionParams({
-                collateral: IERC20Metadata(address(feeToken)),
-                collateralAmount: 100 * ONE,
-                targetRaiseUsdc: 100e6,
-                totalRepaymentUsdc: 120e6,
-                fundingDeadline: block.timestamp + 3 days,
-                repaymentDeadline: block.timestamp + 33 days,
-                namePrefix: "PMFI FEE",
-                symbolPrefix: "pFEE"
-            });
+        PMFIPositionFactoryV21.CreatePositionParams memory params = PMFIPositionFactoryV21.CreatePositionParams({
+            collateral: IERC20Metadata(address(feeToken)),
+            collateralAmount: 100 * ONE,
+            targetRaiseUsdc: 100e6,
+            totalRepaymentUsdc: 120e6,
+            fundingDeadline: block.timestamp + 3 days,
+            repaymentDeadline: block.timestamp + 33 days,
+            namePrefix: "PMFI FEE",
+            symbolPrefix: "pFEE"
+        });
 
         vm.startPrank(borrower);
         feeToken.approve(address(factory), 100 * ONE);
@@ -322,17 +311,16 @@ contract PMFIOpLendingV21Test is TestBase {
         MockERC20Decimals other = new MockERC20Decimals("Other", "OTH", 18);
         other.mint(borrower, 100 * ONE);
 
-        PMFIPositionFactoryV21.CreatePositionParams memory params =
-            PMFIPositionFactoryV21.CreatePositionParams({
-                collateral: IERC20Metadata(address(other)),
-                collateralAmount: 100 * ONE,
-                targetRaiseUsdc: 100e6,
-                totalRepaymentUsdc: 120e6,
-                fundingDeadline: block.timestamp + 3 days,
-                repaymentDeadline: block.timestamp + 33 days,
-                namePrefix: "PMFI OTH",
-                symbolPrefix: "pOTH"
-            });
+        PMFIPositionFactoryV21.CreatePositionParams memory params = PMFIPositionFactoryV21.CreatePositionParams({
+            collateral: IERC20Metadata(address(other)),
+            collateralAmount: 100 * ONE,
+            targetRaiseUsdc: 100e6,
+            totalRepaymentUsdc: 120e6,
+            fundingDeadline: block.timestamp + 3 days,
+            repaymentDeadline: block.timestamp + 33 days,
+            namePrefix: "PMFI OTH",
+            symbolPrefix: "pOTH"
+        });
 
         vm.startPrank(borrower);
         other.approve(address(factory), 100 * ONE);
@@ -372,8 +360,7 @@ contract PMFIOpLendingV21Test is TestBase {
 
         assertTrue(vault.fundingClosed());
         assertEq(
-            marketplace.accruedProtocolFees(),
-            (raise * marketplace.SALE_FEE_BPS()) / marketplace.BPS_DENOMINATOR()
+            marketplace.accruedProtocolFees(), (raise * marketplace.SALE_FEE_BPS()) / marketplace.BPS_DENOMINATOR()
         );
     }
 }

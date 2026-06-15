@@ -5,18 +5,12 @@ import {TestBase} from "./TestBase.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
-import {
-    PMFIPositionFactoryV21,
-    PMFIPositionVaultV21,
-    PMFIPrimaryMarketplaceV21
-} from "../src/PMFIOpLendingV21.sol";
+import {PMFIPositionFactoryV21, PMFIPositionVaultV21, PMFIPrimaryMarketplaceV21} from "../src/PMFIOpLendingV21.sol";
 
 contract InvariantMockERC20 is ERC20 {
     uint8 private immutable _decimals;
 
-    constructor(string memory name_, string memory symbol_, uint8 decimals_)
-        ERC20(name_, symbol_)
-    {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_) ERC20(name_, symbol_) {
         _decimals = decimals_;
     }
 
@@ -34,11 +28,7 @@ contract ExerciseHandler is TestBase {
     InvariantMockERC20 public immutable usdc;
     address public immutable borrower;
 
-    constructor(
-        PMFIPositionVaultV21 vault_,
-        InvariantMockERC20 usdc_,
-        address borrower_
-    ) {
+    constructor(PMFIPositionVaultV21 vault_, InvariantMockERC20 usdc_, address borrower_) {
         vault = vault_;
         usdc = usdc_;
         borrower = borrower_;
@@ -74,11 +64,7 @@ contract PMFIOpLendingV21InvariantTest is TestBase {
     function setUp() public {
         usdc = new InvariantMockERC20("USD Coin", "USDC", 6);
         collateral = new InvariantMockERC20("Collateral", "COL", 18);
-        factory = new PMFIPositionFactoryV21(
-            IERC20Metadata(address(usdc)),
-            feeRecipient,
-            address(this)
-        );
+        factory = new PMFIPositionFactoryV21(IERC20Metadata(address(usdc)), feeRecipient, address(this));
         marketplace = PMFIPrimaryMarketplaceV21(factory.marketplace());
         factory.setCollateralAllowed(address(collateral), true);
 
@@ -87,29 +73,26 @@ contract PMFIOpLendingV21InvariantTest is TestBase {
         usdc.mint(lender, 2_000e6);
         vm.deal(borrower, 1 ether);
 
-        PMFIPositionFactoryV21.CreatePositionParams memory params =
-            PMFIPositionFactoryV21.CreatePositionParams({
-                collateral: IERC20Metadata(address(collateral)),
-                collateralAmount: INITIAL_COLLATERAL,
-                targetRaiseUsdc: 1_000e6,
-                totalRepaymentUsdc: TOTAL_REPAYMENT,
-                fundingDeadline: block.timestamp + 3 days,
-                repaymentDeadline: block.timestamp + 33 days,
-                namePrefix: "PMFI COL",
-                symbolPrefix: "pCOL"
-            });
+        PMFIPositionFactoryV21.CreatePositionParams memory params = PMFIPositionFactoryV21.CreatePositionParams({
+            collateral: IERC20Metadata(address(collateral)),
+            collateralAmount: INITIAL_COLLATERAL,
+            targetRaiseUsdc: 1_000e6,
+            totalRepaymentUsdc: TOTAL_REPAYMENT,
+            fundingDeadline: block.timestamp + 3 days,
+            repaymentDeadline: block.timestamp + 33 days,
+            namePrefix: "PMFI COL",
+            symbolPrefix: "pCOL"
+        });
 
         vm.startPrank(borrower);
         collateral.approve(address(factory), INITIAL_COLLATERAL);
-        (address vaultAddress, uint256 saleId) =
-            factory.createPosition{value: factory.CREATION_FEE()}(params);
+        (address vaultAddress, uint256 saleId) = factory.createPosition{value: factory.CREATION_FEE()}(params);
         usdc.approve(vaultAddress, TOTAL_REPAYMENT);
         vm.stopPrank();
 
         vault = PMFIPositionVaultV21(vaultAddress);
 
-        (,, uint256 totalPayment) =
-            marketplace.quoteTotalPayment(saleId, INITIAL_COLLATERAL);
+        (,, uint256 totalPayment) = marketplace.quoteTotalPayment(saleId, INITIAL_COLLATERAL);
         vm.startPrank(lender);
         usdc.approve(address(marketplace), totalPayment);
         marketplace.buy(saleId, INITIAL_COLLATERAL, totalPayment);
@@ -120,25 +103,16 @@ contract PMFIOpLendingV21InvariantTest is TestBase {
     }
 
     function invariant_NAccountingAlwaysBalances() public view {
-        assertEq(
-            vault.pairedN() + vault.exercisedN() + vault.N().totalSupply(),
-            vault.initialCollateralAmount()
-        );
+        assertEq(vault.pairedN() + vault.exercisedN() + vault.N().totalSupply(), vault.initialCollateralAmount());
     }
 
     function invariant_PSupplyMatchesNonPairedClaims() public view {
-        assertEq(
-            vault.P().totalSupply(),
-            vault.initialCollateralAmount() - vault.pairedN()
-        );
+        assertEq(vault.P().totalSupply(), vault.initialCollateralAmount() - vault.pairedN());
     }
 
     function invariant_ValueBackingBeforeSettlement() public view {
         if (!vault.settled()) {
-            assertEq(
-                collateral.balanceOf(address(vault)) + vault.exercisedN(),
-                vault.P().totalSupply()
-            );
+            assertEq(collateral.balanceOf(address(vault)) + vault.exercisedN(), vault.P().totalSupply());
             assertEq(usdc.balanceOf(address(vault)), vault.usdcPaid());
         }
     }

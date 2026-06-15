@@ -10,7 +10,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-
 struct PMFIPositionConfigV21 {
     address factory;
     address marketplace;
@@ -65,13 +64,9 @@ contract PMFILegTokenV21 is ERC20 {
         _;
     }
 
-    constructor(
-        string memory name_,
-        string memory symbol_,
-        uint8 decimals_,
-        address vault_,
-        bool transfersEnabled_
-    ) ERC20(name_, symbol_) {
+    constructor(string memory name_, string memory symbol_, uint8 decimals_, address vault_, bool transfersEnabled_)
+        ERC20(name_, symbol_)
+    {
         if (vault_ == address(0)) revert ZeroAddress();
         vault = vault_;
         _tokenDecimals = decimals_;
@@ -140,10 +135,7 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
     uint256 public pSupplyAtSettle;
 
     event PositionInitialized(
-        address indexed borrower,
-        uint256 collateralAmount,
-        uint256 pMintedToMarketplace,
-        uint256 nMintedToBorrower
+        address indexed borrower, uint256 collateralAmount, uint256 pMintedToMarketplace, uint256 nMintedToBorrower
     );
     event FundingClosed(uint256 unsoldP, uint256 collateralRefunded, uint256 timestamp);
     event RedeemPair(address indexed user, uint256 amount, uint256 collateralOut);
@@ -186,22 +178,17 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
 
     constructor(PMFIPositionConfigV21 memory config) {
         if (
-            config.factory == address(0) ||
-            config.marketplace == address(0) ||
-            config.borrower == address(0) ||
-            address(config.collateral) == address(0) ||
-            address(config.usdc) == address(0)
+            config.factory == address(0) || config.marketplace == address(0) || config.borrower == address(0)
+                || address(config.collateral) == address(0) || address(config.usdc) == address(0)
         ) revert ZeroAddress();
         if (address(config.collateral) == address(config.usdc)) revert SameTokens();
         if (
-            config.collateralAmount == 0 ||
-            config.targetRaiseUsdc == 0 ||
-            config.totalRepaymentUsdc <= config.targetRaiseUsdc
+            config.collateralAmount == 0 || config.targetRaiseUsdc == 0
+                || config.totalRepaymentUsdc <= config.targetRaiseUsdc
         ) revert ZeroAmount();
-        if (
-            config.fundingDeadline <= block.timestamp ||
-            config.repaymentDeadline <= config.fundingDeadline
-        ) revert BadDeadlines();
+        if (config.fundingDeadline <= block.timestamp || config.repaymentDeadline <= config.fundingDeadline) {
+            revert BadDeadlines();
+        }
 
         uint8 cDec = config.collateral.decimals();
         uint8 uDec = config.usdc.decimals();
@@ -248,12 +235,7 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
         P.mint(marketplace, initialCollateralAmount);
         N.mint(borrower, initialCollateralAmount);
 
-        emit PositionInitialized(
-            borrower,
-            initialCollateralAmount,
-            initialCollateralAmount,
-            initialCollateralAmount
-        );
+        emit PositionInitialized(borrower, initialCollateralAmount, initialCollateralAmount, initialCollateralAmount);
     }
 
     /// @notice Marketplace closes funding and atomically refunds the unfunded collateral portion.
@@ -308,11 +290,7 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
 
     /// @notice Total repayment still required for all N that was not removed through P+N pairing.
     function repaymentRequiredUsdc() public view returns (uint256) {
-        uint256 pairedCredit = Math.mulDiv(
-            totalRepaymentUsdc,
-            pairedN,
-            initialCollateralAmount
-        );
+        uint256 pairedCredit = Math.mulDiv(totalRepaymentUsdc, pairedN, initialCollateralAmount);
         return totalRepaymentUsdc - pairedCredit;
     }
 
@@ -333,11 +311,7 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
         if (processedN == initialCollateralAmount) {
             targetPaid = repaymentRequiredUsdc();
         } else {
-            targetPaid = Math.mulDiv(
-                totalRepaymentUsdc,
-                newExercisedN,
-                initialCollateralAmount
-            );
+            targetPaid = Math.mulDiv(totalRepaymentUsdc, newExercisedN, initialCollateralAmount);
         }
 
         return targetPaid > usdcPaid ? targetPaid - usdcPaid : 0;
@@ -372,13 +346,8 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
 
     /// @notice Early settlement is possible only after all remaining N has been exercised.
     function canSettleEarly() public view returns (bool) {
-        return
-            initialized &&
-            fundingClosed &&
-            !settled &&
-            P.totalSupply() > 0 &&
-            N.totalSupply() == 0 &&
-            usdcPaid == repaymentRequiredUsdc();
+        return initialized && fundingClosed && !settled && P.totalSupply() > 0 && N.totalSupply() == 0
+            && usdcPaid == repaymentRequiredUsdc();
     }
 
     /// @notice Settles early after full repayment, or after the final repayment deadline.
@@ -414,11 +383,7 @@ contract PMFIPositionVaultV21 is ReentrancyGuard {
 
     /// @notice Preview P redemption after settlement.
     /// @dev The final P redeemer receives all remaining rounding dust.
-    function previewRedeemP(uint256 amount)
-        public
-        view
-        returns (uint256 collateralOut, uint256 usdcOut)
-    {
+    function previewRedeemP(uint256 amount) public view returns (uint256 collateralOut, uint256 usdcOut) {
         if (!settled) revert NotSettled();
         if (amount == 0) revert ZeroAmount();
 
@@ -529,27 +494,18 @@ contract PMFIPositionFactoryV21 is ReentrancyGuard, Ownable2Step {
         string symbolPrefix;
     }
 
-    constructor(
-        IERC20Metadata usdc_,
-        address feeRecipient_,
-        address initialOwner_
-    ) Ownable(initialOwner_) {
-        if (
-            address(usdc_) == address(0) ||
-            feeRecipient_ == address(0) ||
-            initialOwner_ == address(0)
-        ) revert ZeroAddress();
+    constructor(IERC20Metadata usdc_, address feeRecipient_, address initialOwner_) Ownable(initialOwner_) {
+        if (address(usdc_) == address(0) || feeRecipient_ == address(0) || initialOwner_ == address(0)) {
+            revert ZeroAddress();
+        }
         if (address(usdc_).code.length == 0) revert NoCode();
         if (usdc_.decimals() != 6) revert BadUsdcDecimals();
 
         USDC = usdc_;
         feeRecipient = feeRecipient_;
 
-        PMFIPrimaryMarketplaceV21 deployedMarketplace = new PMFIPrimaryMarketplaceV21(
-            address(this),
-            usdc_,
-            feeRecipient_
-        );
+        PMFIPrimaryMarketplaceV21 deployedMarketplace =
+            new PMFIPrimaryMarketplaceV21(address(this), usdc_, feeRecipient_);
         marketplace = address(deployedMarketplace);
     }
 
@@ -594,28 +550,23 @@ contract PMFIPositionFactoryV21 is ReentrancyGuard, Ownable2Step {
         }
         if (params.collateral.decimals() > 30) revert BadCollateralDecimals();
         if (
-            params.collateralAmount == 0 ||
-            params.targetRaiseUsdc == 0 ||
-            params.totalRepaymentUsdc <= params.targetRaiseUsdc
+            params.collateralAmount == 0 || params.targetRaiseUsdc == 0
+                || params.totalRepaymentUsdc <= params.targetRaiseUsdc
         ) revert BadAmounts();
 
         if (params.fundingDeadline <= block.timestamp) revert BadDeadlines();
         uint256 fundingPeriod = params.fundingDeadline - block.timestamp;
         if (
-            fundingPeriod < MIN_FUNDING_PERIOD ||
-            fundingPeriod > MAX_FUNDING_PERIOD ||
-            params.repaymentDeadline <= params.fundingDeadline ||
-            params.repaymentDeadline - params.fundingDeadline > MAX_REPAYMENT_PERIOD
+            fundingPeriod < MIN_FUNDING_PERIOD || fundingPeriod > MAX_FUNDING_PERIOD
+                || params.repaymentDeadline <= params.fundingDeadline
+                || params.repaymentDeadline - params.fundingDeadline > MAX_REPAYMENT_PERIOD
         ) revert BadDeadlines();
 
         uint256 nameLength = bytes(params.namePrefix).length;
         uint256 symbolLength = bytes(params.symbolPrefix).length;
-        if (
-            nameLength == 0 ||
-            symbolLength == 0 ||
-            nameLength > MAX_PREFIX_BYTES ||
-            symbolLength > MAX_PREFIX_BYTES
-        ) revert BadPrefix();
+        if (nameLength == 0 || symbolLength == 0 || nameLength > MAX_PREFIX_BYTES || symbolLength > MAX_PREFIX_BYTES) {
+            revert BadPrefix();
+        }
 
         PMFIPositionConfigV21 memory config = PMFIPositionConfigV21({
             factory: address(this),
@@ -651,11 +602,9 @@ contract PMFIPositionFactoryV21 is ReentrancyGuard, Ownable2Step {
         _emitPositionCreated(v, params, saleId);
     }
 
-    function _emitPositionCreated(
-        PMFIPositionVaultV21 v,
-        CreatePositionParams calldata params,
-        uint256 saleId
-    ) internal {
+    function _emitPositionCreated(PMFIPositionVaultV21 v, CreatePositionParams calldata params, uint256 saleId)
+        internal
+    {
         emit PositionCreated(
             msg.sender,
             address(v),
@@ -680,7 +629,7 @@ contract PMFIPositionFactoryV21 is ReentrancyGuard, Ownable2Step {
         uint256 amount = address(this).balance;
         if (amount == 0) revert NoFees();
 
-        (bool ok, ) = payable(feeRecipient).call{value: amount}("");
+        (bool ok,) = payable(feeRecipient).call{value: amount}("");
         if (!ok) revert EthTransferFailed();
 
         emit CreationFeesWithdrawn(feeRecipient, amount);
@@ -735,12 +684,7 @@ contract PMFIPrimaryMarketplaceV21 is ReentrancyGuard {
         uint256 feeAmount,
         uint256 totalPaid
     );
-    event SaleClosed(
-        uint256 indexed saleId,
-        uint256 pBurnedAsUnfunded,
-        bool fullyFilled,
-        bool expired
-    );
+    event SaleClosed(uint256 indexed saleId, uint256 pBurnedAsUnfunded, bool fullyFilled, bool expired);
     event ProtocolFeesWithdrawn(address indexed recipient, uint256 amount);
 
     error OnlyFactory();
@@ -768,16 +712,10 @@ contract PMFIPrimaryMarketplaceV21 is ReentrancyGuard {
         _;
     }
 
-    constructor(
-        address factory_,
-        IERC20Metadata usdc_,
-        address feeRecipient_
-    ) {
-        if (
-            factory_ == address(0) ||
-            address(usdc_) == address(0) ||
-            feeRecipient_ == address(0)
-        ) revert UnverifiedVault();
+    constructor(address factory_, IERC20Metadata usdc_, address feeRecipient_) {
+        if (factory_ == address(0) || address(usdc_) == address(0) || feeRecipient_ == address(0)) {
+            revert UnverifiedVault();
+        }
         factory = factory_;
         USDC = usdc_;
         feeRecipient = feeRecipient_;
@@ -822,16 +760,7 @@ contract PMFIPrimaryMarketplaceV21 is ReentrancyGuard {
         saleId = sales.length - 1;
         saleIdPlusOneByVault[vault] = saleId + 1;
 
-        emit SaleRegistered(
-            saleId,
-            vault,
-            seller,
-            address(pToken),
-            address(USDC),
-            pAmount,
-            totalUsdcPrice,
-            expiry
-        );
+        emit SaleRegistered(saleId, vault, seller, address(pToken), address(USDC), pAmount, totalUsdcPrice, expiry);
     }
 
     /// @notice Quotes seller proceeds for a partial fill. Final fill includes all quote dust.
@@ -846,11 +775,7 @@ contract PMFIPrimaryMarketplaceV21 is ReentrancyGuard {
     /// @notice Cumulative fee calculation makes the final fee independent of fill splitting.
     function quoteFee(uint256 saleId, uint256 sellerPrice) public view returns (uint256) {
         Sale storage s = sales[saleId];
-        uint256 cumulativeFee = Math.mulDiv(
-            s.usdcRaisedToSeller + sellerPrice,
-            SALE_FEE_BPS,
-            BPS_DENOMINATOR
-        );
+        uint256 cumulativeFee = Math.mulDiv(s.usdcRaisedToSeller + sellerPrice, SALE_FEE_BPS, BPS_DENOMINATOR);
         return cumulativeFee - s.feeAccrued;
     }
 
@@ -866,10 +791,7 @@ contract PMFIPrimaryMarketplaceV21 is ReentrancyGuard {
 
     /// @notice Buys a partial amount of verified P with official USDC.
     /// @param maxTotalPayment User-provided slippage ceiling; protects against stale UI quotes.
-    function buy(uint256 saleId, uint256 pAmount, uint256 maxTotalPayment)
-        external
-        nonReentrant
-    {
+    function buy(uint256 saleId, uint256 pAmount, uint256 maxTotalPayment) external nonReentrant {
         if (IPMFIPositionFactoryV21(factory).purchasesPaused()) revert PurchasesPaused();
 
         Sale storage s = sales[saleId];
