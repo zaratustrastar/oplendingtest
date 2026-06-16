@@ -1,0 +1,1 @@
+Independent review workspace for commit 435c9fc53817d10995c9d34af46670b2d691b8da. The production contract is unchanged; this branch contains only targeted regression proofs and CI reproduction configuration.
