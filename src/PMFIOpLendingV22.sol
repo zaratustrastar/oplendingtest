@@ -258,7 +258,6 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         if (unsoldP > N.balanceOf(borrower)) revert InsufficientBorrowerN();
 
         fundingClosed = true;
-        uint256 refundClaimRecorded;
 
         if (unsoldP > 0) {
             pairedN += unsoldP;
@@ -267,7 +266,6 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
 
             accountedCollateral -= unsoldP;
             collateralRefundClaim = unsoldP;
-            refundClaimRecorded = unsoldP;
         }
 
         if (P.totalSupply() == 0) {
@@ -275,7 +273,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         }
 
         _assertAccountingInvariant();
-        emit FundingClosed(unsoldP, refundClaimRecorded, block.timestamp);
+        emit FundingClosed(unsoldP, unsoldP, block.timestamp);
     }
 
     /// @notice Transfers collateral reserved for the borrower when funding closed with unsold P.
