@@ -53,7 +53,7 @@ interface IPMFIPrimaryMarketplaceV22 {
 contract PMFILegTokenV22 is ERC20 {
     address public immutable vault;
     uint8 private immutable _tokenDecimals;
-    bool public transfersEnabled;
+    bool public immutable transfersEnabled;
 
     error OnlyVault();
     error ZeroAddress();
@@ -83,10 +83,6 @@ contract PMFILegTokenV22 is ERC20 {
 
     function burn(address from, uint256 amount) external onlyVault {
         _burn(from, amount);
-    }
-
-    function enableTransfers() external onlyVault {
-        transfersEnabled = true;
     }
 
     function _update(address from, address to, uint256 value) internal override {
@@ -125,7 +121,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     bool public settled;
     bool public closedWithoutOutstandingP;
 
-    // Cumulative accounting prevents repayment under-collection from split exercises.
+    // Accounting for P+N pair exits and borrower full repayment.
     uint256 public pairedN;
     uint256 public exercisedN;
     uint256 public usdcPaid;
@@ -147,7 +143,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     event FundingClosed(uint256 unsoldP, uint256 collateralRefundClaimRecorded, uint256 timestamp);
     event CollateralRefundClaimed(address indexed borrower, address indexed recipient, uint256 amount);
     event RedeemPair(address indexed user, uint256 amount, uint256 collateralOut);
-    event Exercise(address indexed user, uint256 nAmount, uint256 usdcPaid, uint256 collateralOut);
+    event FullRepayment(address indexed borrower, uint256 nBurned, uint256 usdcPaid, uint256 collateralOut);
     event Settled(bool early, uint256 collateralPool, uint256 usdcPool, uint256 pSupply);
     event RedeemP(address indexed user, uint256 pAmount, uint256 collateralOut, uint256 usdcOut);
 
@@ -168,7 +164,6 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     error TooEarly();
     error NotSettled();
     error NoPSupply();
-    error ExerciseAmountTooSmall();
     error InsufficientCollateral();
     error InsufficientUnsoldP();
     error InsufficientBorrowerN();
@@ -271,8 +266,6 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
             refundClaimRecorded = unsoldP;
         }
 
-        N.enableTransfers();
-
         if (P.totalSupply() == 0) {
             closedWithoutOutstandingP = true;
         }
@@ -336,50 +329,66 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         return required > usdcPaid ? required - usdcPaid : 0;
     }
 
-    /// @notice Exact incremental USDC owed for this exercise under cumulative accounting.
-    /// @dev The final exercise pays all remaining quote dust exactly.
-    function usdcOwed(uint256 amount) public view returns (uint256) {
-        if (amount == 0 || amount > N.totalSupply()) return 0;
-
-        uint256 newExercisedN = exercisedN + amount;
-        uint256 processedN = pairedN + newExercisedN;
-        uint256 targetPaid;
-
-        if (processedN == initialCollateralAmount) {
-            targetPaid = repaymentRequiredUsdc();
-        } else {
-            targetPaid = Math.mulDiv(totalRepaymentUsdc, newExercisedN, initialCollateralAmount);
-        }
-
-        return targetPaid > usdcPaid ? targetPaid - usdcPaid : 0;
-    }
-
-    /// @notice Burns N, collects fixed USDC repayment, and returns equal collateral.
-    /// @dev Early repayment is allowed after funding is closed. Tiny fragments that round to zero must be aggregated.
-    function exercise(uint256 amount) external nonReentrant {
+    /// @notice Repays the entire obligation for the P that was actually funded.
+    /// @dev Only the borrower may repay. All remaining N is burned and all
+    ///      protocol-accounted collateral is returned atomically.
+    function repayInFull() external nonReentrant {
         if (!initialized) revert NotInitialized();
         if (!fundingClosed) revert FundingStillOpen();
         if (settled) revert AlreadySettled();
-        if (block.timestamp > repaymentDeadline) revert RepaymentClosed();
-        if (amount == 0) revert ZeroAmount();
+        if (msg.sender != borrower) revert OnlyBorrower();
+        if (block.timestamp > repaymentDeadline) {
+            revert RepaymentClosed();
+        }
 
-        uint256 owed = usdcOwed(amount);
-        if (owed == 0) revert ExerciseAmountTooSmall();
+        uint256 nAmount = N.totalSupply();
+        if (nAmount == 0 || P.totalSupply() == 0) {
+            revert NoPSupply();
+        }
 
-        exercisedN += amount;
-        usdcPaid += owed;
-        accountedCollateral -= amount;
-        N.burn(msg.sender, amount);
+        if (N.balanceOf(borrower) != nAmount) {
+            revert InsufficientBorrowerN();
+        }
 
-        uint256 beforeBal = usdc.balanceOf(address(this));
-        IERC20(address(usdc)).safeTransferFrom(msg.sender, address(this), owed);
-        uint256 received = usdc.balanceOf(address(this)) - beforeBal;
-        if (received != owed) revert FeeOnTransferUnsupported();
+        if (accountedCollateral != nAmount || exercisedN != 0 || usdcPaid != 0) {
+            revert AccountingInvariantBroken();
+        }
 
-        IERC20(address(collateral)).safeTransfer(msg.sender, amount);
+        uint256 required = repaymentRequiredUsdc();
+
+        // Effects occur before token interactions. Any failed transfer reverts
+        // the complete transaction and restores all state and token balances.
+        exercisedN = nAmount;
+        usdcPaid = required;
+        accountedCollateral = 0;
+        N.burn(borrower, nAmount);
+
+        uint256 vaultUsdcBefore = usdc.balanceOf(address(this));
+
+        IERC20(address(usdc)).safeTransferFrom(borrower, address(this), required);
+
+        uint256 vaultUsdcAfter = usdc.balanceOf(address(this));
+
+        if (vaultUsdcAfter < vaultUsdcBefore || vaultUsdcAfter - vaultUsdcBefore != required) {
+            revert FeeOnTransferUnsupported();
+        }
+
+        uint256 borrowerCollateralBefore = collateral.balanceOf(borrower);
+
+        IERC20(address(collateral)).safeTransfer(borrower, nAmount);
+
+        uint256 borrowerCollateralAfter = collateral.balanceOf(borrower);
+
+        if (
+            borrowerCollateralAfter < borrowerCollateralBefore
+                || borrowerCollateralAfter - borrowerCollateralBefore != nAmount
+        ) {
+            revert FeeOnTransferUnsupported();
+        }
 
         _assertAccountingInvariant();
-        emit Exercise(msg.sender, amount, owed, amount);
+
+        emit FullRepayment(borrower, nAmount, required, nAmount);
     }
 
     /// @notice Early settlement is possible only after all remaining N has been exercised.
