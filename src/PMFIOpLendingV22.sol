@@ -130,6 +130,10 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     uint256 public exercisedN;
     uint256 public usdcPaid;
 
+    // Remaining protocol-accounted collateral backing active position claims.
+    // Direct token donations are intentionally excluded.
+    uint256 public accountedCollateral;
+
     // Collateral reserved for the borrower after unsold P and matching N are burned.
     uint256 public collateralRefundClaim;
 
@@ -233,11 +237,12 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     /// @notice Initializes once after the factory has transferred the exact collateral amount.
     function initializePosition() external onlyFactory {
         if (initialized) revert AlreadyInitialized();
-        if (collateral.balanceOf(address(this)) != initialCollateralAmount) {
+        if (collateral.balanceOf(address(this)) < initialCollateralAmount) {
             revert InsufficientCollateral();
         }
 
         initialized = true;
+        accountedCollateral = initialCollateralAmount;
         P.mint(marketplace, initialCollateralAmount);
         N.mint(borrower, initialCollateralAmount);
 
@@ -261,6 +266,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
             P.burn(marketplace, unsoldP);
             N.burn(borrower, unsoldP);
 
+            accountedCollateral -= unsoldP;
             collateralRefundClaim = unsoldP;
             refundClaimRecorded = unsoldP;
         }
@@ -306,6 +312,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         if (amount == 0) revert ZeroAmount();
 
         pairedN += amount;
+        accountedCollateral -= amount;
         P.burn(msg.sender, amount);
         N.burn(msg.sender, amount);
         IERC20(address(collateral)).safeTransfer(msg.sender, amount);
@@ -361,6 +368,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
 
         exercisedN += amount;
         usdcPaid += owed;
+        accountedCollateral -= amount;
         N.burn(msg.sender, amount);
 
         uint256 beforeBal = usdc.balanceOf(address(this));
@@ -404,7 +412,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         if (pSupply == 0) revert NoPSupply();
 
         settled = true;
-        collateralPoolAtSettle = collateral.balanceOf(address(this));
+        collateralPoolAtSettle = accountedCollateral;
         usdcPoolAtSettle = usdc.balanceOf(address(this));
         pSupplyAtSettle = pSupply;
 
@@ -421,7 +429,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         if (currentSupply == 0 || pSupplyAtSettle == 0) revert NoPSupply();
 
         if (amount == currentSupply) {
-            collateralOut = collateral.balanceOf(address(this));
+            collateralOut = accountedCollateral;
             usdcOut = usdc.balanceOf(address(this));
         } else {
             collateralOut = Math.mulDiv(collateralPoolAtSettle, amount, pSupplyAtSettle);
@@ -437,7 +445,10 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         (uint256 collateralOut, uint256 usdcOut) = previewRedeemP(amount);
         P.burn(user, amount);
 
-        if (collateralOut > 0) IERC20(address(collateral)).safeTransfer(user, collateralOut);
+        if (collateralOut > 0) {
+            accountedCollateral -= collateralOut;
+            IERC20(address(collateral)).safeTransfer(user, collateralOut);
+        }
         if (usdcOut > 0) IERC20(address(usdc)).safeTransfer(user, usdcOut);
 
         emit RedeemP(user, amount, collateralOut, usdcOut);
