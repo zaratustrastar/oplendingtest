@@ -343,6 +343,27 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         return required > usdcPaid ? required - usdcPaid : 0;
     }
 
+    /// @dev Pulls exactly `amount` USDC from `payer`.
+    ///      Both payer and vault balance deltas must be exact.
+    function _safeTransferRepaymentUsdcFromExact(address payer, uint256 amount) private {
+        uint256 payerBalanceBefore = usdc.balanceOf(payer);
+
+        uint256 vaultBalanceBefore = usdc.balanceOf(address(this));
+
+        IERC20(address(usdc)).safeTransferFrom(payer, address(this), amount);
+
+        uint256 payerBalanceAfter = usdc.balanceOf(payer);
+
+        uint256 vaultBalanceAfter = usdc.balanceOf(address(this));
+
+        if (
+            payerBalanceAfter > payerBalanceBefore || payerBalanceBefore - payerBalanceAfter != amount
+                || vaultBalanceAfter < vaultBalanceBefore || vaultBalanceAfter - vaultBalanceBefore != amount
+        ) {
+            revert FeeOnTransferUnsupported();
+        }
+    }
+
     /// @notice Repays the entire obligation for the P that was actually funded.
     /// @dev Only the borrower may repay. All remaining N is burned and all
     ///      protocol-accounted collateral is returned atomically.
@@ -377,15 +398,7 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         accountedCollateral = 0;
         N.burn(borrower, nAmount);
 
-        uint256 vaultUsdcBefore = usdc.balanceOf(address(this));
-
-        IERC20(address(usdc)).safeTransferFrom(borrower, address(this), required);
-
-        uint256 vaultUsdcAfter = usdc.balanceOf(address(this));
-
-        if (vaultUsdcAfter < vaultUsdcBefore || vaultUsdcAfter - vaultUsdcBefore != required) {
-            revert FeeOnTransferUnsupported();
-        }
+        _safeTransferRepaymentUsdcFromExact(borrower, required);
 
         uint256 borrowerCollateralBefore = collateral.balanceOf(borrower);
 
@@ -624,6 +637,30 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         emit PurchasesPausedSet(paused);
     }
 
+    /// @dev Pulls exactly `amount` collateral from `payer`.
+    ///      Both payer and vault balance deltas must be exact.
+    function _safeTransferCollateralFromExact(IERC20Metadata token, address payer, address recipient, uint256 amount)
+        private
+    {
+        uint256 payerBalanceBefore = token.balanceOf(payer);
+
+        uint256 recipientBalanceBefore = token.balanceOf(recipient);
+
+        IERC20(address(token)).safeTransferFrom(payer, recipient, amount);
+
+        uint256 payerBalanceAfter = token.balanceOf(payer);
+
+        uint256 recipientBalanceAfter = token.balanceOf(recipient);
+
+        if (
+            payerBalanceAfter > payerBalanceBefore || payerBalanceBefore - payerBalanceAfter != amount
+                || recipientBalanceAfter < recipientBalanceBefore
+                || recipientBalanceAfter - recipientBalanceBefore != amount
+        ) {
+            revert FeeOnTransferUnsupported();
+        }
+    }
+
     /// @notice Creates, collateralizes, mints, verifies, and lists one borrower position atomically.
     /// @dev User first approves the exact collateral amount to this factory.
     function createPosition(CreatePositionParams calldata params)
@@ -680,10 +717,7 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         PMFIPositionVaultV22 v = new PMFIPositionVaultV22(config);
         vault = address(v);
 
-        uint256 beforeBal = params.collateral.balanceOf(vault);
-        IERC20(collateralAddress).safeTransferFrom(msg.sender, vault, params.collateralAmount);
-        uint256 received = params.collateral.balanceOf(vault) - beforeBal;
-        if (received != params.collateralAmount) revert FeeOnTransferUnsupported();
+        _safeTransferCollateralFromExact(params.collateral, msg.sender, vault, params.collateralAmount);
 
         v.initializePosition();
 
@@ -888,6 +922,28 @@ contract PMFIPrimaryMarketplaceV22 is ReentrancyGuard {
         totalPaid = sellerPrice + feeAmount;
     }
 
+    /// @dev Pulls exactly `amount` USDC from `payer`.
+    ///      Both payer and marketplace balance deltas must be exact.
+    function _safeTransferPurchaseUsdcFromExact(address payer, uint256 amount) private {
+        uint256 payerBalanceBefore = USDC.balanceOf(payer);
+
+        uint256 marketplaceBalanceBefore = USDC.balanceOf(address(this));
+
+        IERC20(address(USDC)).safeTransferFrom(payer, address(this), amount);
+
+        uint256 payerBalanceAfter = USDC.balanceOf(payer);
+
+        uint256 marketplaceBalanceAfter = USDC.balanceOf(address(this));
+
+        if (
+            payerBalanceAfter > payerBalanceBefore || payerBalanceBefore - payerBalanceAfter != amount
+                || marketplaceBalanceAfter < marketplaceBalanceBefore
+                || marketplaceBalanceAfter - marketplaceBalanceBefore != amount
+        ) {
+            revert FeeOnTransferUnsupported();
+        }
+    }
+
     /// @notice Buys a partial amount of verified P with official USDC.
     /// @param maxTotalPayment User-provided slippage ceiling; protects against stale UI quotes.
     function buy(uint256 saleId, uint256 pAmount, uint256 maxTotalPayment) external nonReentrant {
@@ -911,10 +967,7 @@ contract PMFIPrimaryMarketplaceV22 is ReentrancyGuard {
         s.feeAccrued += feeAmount;
         accruedProtocolFees += feeAmount;
 
-        uint256 beforeBal = USDC.balanceOf(address(this));
-        IERC20(address(USDC)).safeTransferFrom(msg.sender, address(this), totalPaid);
-        uint256 received = USDC.balanceOf(address(this)) - beforeBal;
-        if (received != totalPaid) revert FeeOnTransferUnsupported();
+        _safeTransferPurchaseUsdcFromExact(msg.sender, totalPaid);
 
         _safeTransferUsdcExact(s.seller, sellerPrice);
 
