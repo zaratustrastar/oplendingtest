@@ -312,7 +312,17 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         accountedCollateral -= amount;
         P.burn(msg.sender, amount);
         N.burn(msg.sender, amount);
+
+        uint256 recipientBalanceBefore = collateral.balanceOf(msg.sender);
+
         IERC20(address(collateral)).safeTransfer(msg.sender, amount);
+
+        uint256 recipientBalanceAfter = collateral.balanceOf(msg.sender);
+
+        if (recipientBalanceAfter < recipientBalanceBefore || recipientBalanceAfter - recipientBalanceBefore != amount)
+        {
+            revert FeeOnTransferUnsupported();
+        }
 
         if (P.totalSupply() == 0) {
             closedWithoutOutstandingP = true;
@@ -465,11 +475,33 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
 
         if (collateralOut > 0) {
             accountedCollateral -= collateralOut;
+
+            uint256 userCollateralBefore = collateral.balanceOf(user);
+
             IERC20(address(collateral)).safeTransfer(user, collateralOut);
+
+            uint256 userCollateralAfter = collateral.balanceOf(user);
+
+            if (
+                userCollateralAfter < userCollateralBefore
+                    || userCollateralAfter - userCollateralBefore != collateralOut
+            ) {
+                revert FeeOnTransferUnsupported();
+            }
         }
+
         if (usdcOut > 0) {
             usdcPoolRemaining -= usdcOut;
+
+            uint256 userUsdcBefore = usdc.balanceOf(user);
+
             IERC20(address(usdc)).safeTransfer(user, usdcOut);
+
+            uint256 userUsdcAfter = usdc.balanceOf(user);
+
+            if (userUsdcAfter < userUsdcBefore || userUsdcAfter - userUsdcBefore != usdcOut) {
+                revert FeeOnTransferUnsupported();
+            }
         }
 
         emit RedeemP(user, amount, collateralOut, usdcOut);
@@ -542,6 +574,7 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
     error FeeOnTransferUnsupported();
     error NoFees();
     error EthTransferFailed();
+    error OwnershipRenunciationDisabled();
 
     struct CreatePositionParams {
         IERC20Metadata collateral;
@@ -567,6 +600,12 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         PMFIPrimaryMarketplaceV22 deployedMarketplace =
             new PMFIPrimaryMarketplaceV22(address(this), usdc_, feeRecipient_);
         marketplace = address(deployedMarketplace);
+    }
+
+    /// @notice Ownership renunciation is disabled so protocol
+    ///         allowlist and pause controls cannot be orphaned.
+    function renounceOwnership() public view override onlyOwner {
+        revert OwnershipRenunciationDisabled();
     }
 
     function setCollateralAllowed(address collateral_, bool allowed) external onlyOwner {
