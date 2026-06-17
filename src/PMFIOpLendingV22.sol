@@ -501,7 +501,6 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
     address public immutable feeRecipient;
     address public immutable marketplace;
 
-    bool public permissionlessCollateral;
     bool public creationPaused;
     bool public purchasesPaused;
 
@@ -524,7 +523,6 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         uint256 saleId
     );
     event CollateralAllowed(address indexed collateral, bool allowed);
-    event PermissionlessCollateralSet(bool enabled);
     event CreationPausedSet(bool paused);
     event PurchasesPausedSet(bool paused);
     event CreationFeesWithdrawn(address indexed recipient, uint256 amount);
@@ -577,11 +575,6 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         emit CollateralAllowed(collateral_, allowed);
     }
 
-    function setPermissionlessCollateral(bool enabled) external onlyOwner {
-        permissionlessCollateral = enabled;
-        emit PermissionlessCollateralSet(enabled);
-    }
-
     function setCreationPaused(bool paused) external onlyOwner {
         creationPaused = paused;
         emit CreationPausedSet(paused);
@@ -607,7 +600,7 @@ contract PMFIPositionFactoryV22 is ReentrancyGuard, Ownable2Step {
         if (collateralAddress == address(0)) revert ZeroAddress();
         if (collateralAddress == address(USDC)) revert SameTokens();
         if (collateralAddress.code.length == 0) revert NoCode();
-        if (!permissionlessCollateral && !collateralAllowed[collateralAddress]) {
+        if (!collateralAllowed[collateralAddress]) {
             revert CollateralNotAllowed();
         }
         if (params.collateral.decimals() > 30) revert BadCollateralDecimals();
