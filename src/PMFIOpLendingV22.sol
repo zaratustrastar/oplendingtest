@@ -137,6 +137,10 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
     uint256 public usdcPoolAtSettle;
     uint256 public pSupplyAtSettle;
 
+    // Remaining tracked USDC available to P holders after settlement.
+    // Direct token donations are intentionally excluded.
+    uint256 public usdcPoolRemaining;
+
     event PositionInitialized(
         address indexed borrower, uint256 collateralAmount, uint256 pMintedToMarketplace, uint256 nMintedToBorrower
     );
@@ -421,29 +425,34 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
         if (pSupply == 0) revert NoPSupply();
 
         settled = true;
-        collateralPoolAtSettle = accountedCollateral;
-        usdcPoolAtSettle = usdc.balanceOf(address(this));
+
+        // Binary settlement:
+        // - full repayment gives P holders USDC only;
+        // - default gives P holders accounted collateral only.
+        collateralPoolAtSettle = early ? 0 : accountedCollateral;
+        usdcPoolAtSettle = early ? usdcPaid : 0;
+        usdcPoolRemaining = usdcPoolAtSettle;
         pSupplyAtSettle = pSupply;
 
         emit Settled(early, collateralPoolAtSettle, usdcPoolAtSettle, pSupplyAtSettle);
     }
 
     /// @notice Preview P redemption after settlement.
-    /// @dev The final P redeemer receives all remaining rounding dust.
+    /// @dev Claims use remaining tracked pools and the current P supply.
+    ///      Direct token donations never create redemption entitlements.
     function previewRedeemP(uint256 amount) public view returns (uint256 collateralOut, uint256 usdcOut) {
         if (!settled) revert NotSettled();
         if (amount == 0) revert ZeroAmount();
 
         uint256 currentSupply = P.totalSupply();
-        if (currentSupply == 0 || pSupplyAtSettle == 0) revert NoPSupply();
 
-        if (amount == currentSupply) {
-            collateralOut = accountedCollateral;
-            usdcOut = usdc.balanceOf(address(this));
-        } else {
-            collateralOut = Math.mulDiv(collateralPoolAtSettle, amount, pSupplyAtSettle);
-            usdcOut = Math.mulDiv(usdcPoolAtSettle, amount, pSupplyAtSettle);
+        if (currentSupply == 0 || pSupplyAtSettle == 0) {
+            revert NoPSupply();
         }
+
+        collateralOut = Math.mulDiv(accountedCollateral, amount, currentSupply);
+
+        usdcOut = Math.mulDiv(usdcPoolRemaining, amount, currentSupply);
     }
 
     function redeemP(uint256 amount) external nonReentrant {
@@ -458,7 +467,10 @@ contract PMFIPositionVaultV22 is ReentrancyGuard {
             accountedCollateral -= collateralOut;
             IERC20(address(collateral)).safeTransfer(user, collateralOut);
         }
-        if (usdcOut > 0) IERC20(address(usdc)).safeTransfer(user, usdcOut);
+        if (usdcOut > 0) {
+            usdcPoolRemaining -= usdcOut;
+            IERC20(address(usdc)).safeTransfer(user, usdcOut);
+        }
 
         emit RedeemP(user, amount, collateralOut, usdcOut);
     }
