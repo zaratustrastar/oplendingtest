@@ -1,0 +1,31 @@
+name: Independent audit reproduction
+
+on:
+  push:
+    branches:
+      - audit/independent-review-435c9fc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  foundry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install pinned OpenZeppelin dependency
+        run: |
+          rm -rf lib/openzeppelin-contracts
+          git clone --depth 1 --branch v5.0.2 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
+      - name: Format check
+        run: forge fmt --check
+      - name: Compile and report sizes
+        run: forge build --sizes
+      - name: Reproduce frozen test suite
+        run: forge test -vvv
+      - name: Run independent targeted proofs
+        run: forge test --match-contract 'PMFIOpLendingV21Audit.*Test' -vvvv
